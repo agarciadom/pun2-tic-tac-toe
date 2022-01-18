@@ -11,18 +11,18 @@ public class SquareGridPopulator : MonoBehaviour
     private GridLayoutGroup gridLayout;
     private RectTransform rectTransform;
 
-    public int Size = 3;
+    public GameManager gameManager;
     public float CellWidth, CellHeight, XSpacing, YSpacing;
-
-    void Start()
-    {
-        CreateGrid();
-    }
 
     void Awake()
     {
         gridLayout = GetComponent<GridLayoutGroup>();
         rectTransform = GetComponent<RectTransform>();
+    }
+
+    void Start()
+    {
+        CreateGrid();
     }
 
     private void CreateGrid()
@@ -34,13 +34,14 @@ public class SquareGridPopulator : MonoBehaviour
 
         if (prefab != null)
         {
-            float totalWidth = Size * CellWidth + (Size - 1) * XSpacing;
-            float totalHeight = Size * CellHeight + (Size - 1) * YSpacing;
+            int n = gameManager.Size;
+            float totalWidth = n * CellWidth + (n - 1) * XSpacing;
+            float totalHeight = n * CellHeight + (n - 1) * YSpacing;
             rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, totalWidth);
             rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, totalHeight);
-            gridLayout.constraintCount = Size;
+            gridLayout.constraintCount = n;
 
-            for (int i = 0; i < Size * Size; i++)
+            for (int i = 0; i < n * n; i++)
             {
                 GameObject newObject = Instantiate(prefab);
                 newObject.transform.SetParent(gameObject.transform);
@@ -48,8 +49,9 @@ public class SquareGridPopulator : MonoBehaviour
                 GridCell cell = newObject.GetComponent<GridCell>();
                 if (cell != null)
                 {
-                    cell.Row = i / Size;
-                    cell.Column = i % Size;
+                    cell.gameManager = gameManager;
+                    cell.Row = i / n;
+                    cell.Column = i % n;
                 }
             }
         }

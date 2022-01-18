@@ -4,14 +4,12 @@ using UnityEngine;
 
 public class GridCell : MonoBehaviour
 {
-    public enum MarkType { EMPTY, X, O }
-
-    public int Row, Column;
-
-    private static MarkType turn = MarkType.O;
-
     private const string xMarkerName = "XMarker";
     private const string oMarkerName = "OMarker";
+
+    public int Row, Column;
+    public GameManager gameManager;
+
     private GameObject oMarker, xMarker;
 
     void Awake()
@@ -20,19 +18,15 @@ public class GridCell : MonoBehaviour
         xMarker = transform.Find(oMarkerName).gameObject;
     }
 
-    public void SetMark(MarkType m)
+    public void SetMark(GameManager.MarkType m)
     {
-        oMarker.SetActive(m == MarkType.O);
-        xMarker.SetActive(m == MarkType.X);
+        oMarker.SetActive(m == GameManager.MarkType.O);
+        xMarker.SetActive(m == GameManager.MarkType.X);
     }
 
     void OnMouseDown()
     {
-        Debug.Log($"Clicked on row {Row}, column {Column}");
-        SetMark(turn);
-
-        // change turn
-        turn = turn == MarkType.O ? MarkType.X : MarkType.O;
+        gameManager.CellClicked(this);
     }
 
 }
