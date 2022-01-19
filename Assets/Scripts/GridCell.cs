@@ -12,16 +12,26 @@ public class GridCell : MonoBehaviour
 
     private GameObject oMarker, xMarker;
 
+    private GameManager.MarkType _mark = GameManager.MarkType.EMPTY;
+    
+    public GameManager.MarkType Mark
+    {
+        get
+        {
+            return _mark;
+        }
+        set
+        {
+            _mark = value;
+            oMarker.SetActive(value == GameManager.MarkType.O);
+            xMarker.SetActive(value == GameManager.MarkType.X);
+        }
+    }
+
     void Awake()
     {
         oMarker = transform.Find(xMarkerName).gameObject;
         xMarker = transform.Find(oMarkerName).gameObject;
-    }
-
-    public void SetMark(GameManager.MarkType m)
-    {
-        oMarker.SetActive(m == GameManager.MarkType.O);
-        xMarker.SetActive(m == GameManager.MarkType.X);
     }
 
     void OnMouseDown()

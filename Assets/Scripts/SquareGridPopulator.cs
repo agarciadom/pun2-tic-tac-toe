@@ -6,10 +6,12 @@ public class SquareGridPopulator : MonoBehaviour
 {
     [SerializeField] private GameObject prefab;
 
+    [SerializeField] private GameManager gameManager;
     private GridLayoutGroup gridLayout;
     private RectTransform rectTransform;
 
-    public GameManager gameManager;
+    public GridCell[] Cells { get; private set; }
+
     public float CellWidth, CellHeight, XSpacing, YSpacing;
 
     void Awake()
@@ -39,7 +41,8 @@ public class SquareGridPopulator : MonoBehaviour
             rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, totalHeight);
             gridLayout.constraintCount = n;
 
-            for (int i = 0; i < n * n; i++)
+            this.Cells = new GridCell[n * n];
+            for (int i = 0; i < Cells.Length; i++)
             {
                 GameObject newObject = Instantiate(prefab);
                 newObject.transform.SetParent(gameObject.transform);
@@ -51,6 +54,7 @@ public class SquareGridPopulator : MonoBehaviour
                     cell.Row = i / n;
                     cell.Column = i % n;
                 }
+                Cells[i] = cell;
             }
         }
     }

@@ -2,16 +2,23 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Photon.Pun;
+using Photon.Realtime;
+using ExitGames.Client.Photon;
 
 /**
  * Holds the current state of the game, and updates the display.
  * 
  * Detects the winning condition.
  */
-public class GameManager : MonoBehaviour, IPunObservable
+public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCallback
 {
+    // Event: the remote player has clicked on a cell at (row, column)
+    public const int EVENT_MOVE = 1;
+
+    // Possible turns and states of a cell
     public enum MarkType { EMPTY, X, O, TIE }
 
+    // Text label we will use to display state
     public TextMeshProUGUI turnText;
 
     // Number of columns and rows of the grid
@@ -28,13 +35,22 @@ public class GameManager : MonoBehaviour, IPunObservable
             _turn = value;
             if (Winner == MarkType.EMPTY)
             {
-                turnText.text = $"Turn: {value}";
+                if (PhotonNetwork.IsConnected)
+                {
+                    turnText.text = MyTurn == Turn
+                        ? "Your turn, " + PhotonNetwork.NickName
+                        : "Waiting for " + PhotonNetwork.NickName;
+                }
+                else
+                {
+                    turnText.text = $"Turn: {value}";
+                }
             }
         }
     }
 
     // Winner of the game
-    private MarkType _winner = MarkType.EMPTY;
+    private MarkType _winner;
     public MarkType Winner
     {
         get
@@ -49,34 +65,53 @@ public class GameManager : MonoBehaviour, IPunObservable
             {
                 case MarkType.O:
                 case MarkType.X:
-                    turnText.text = $"Winner: {value}! - SPACE to reset, ESC to quit";
+                    turnText.text = photonView.IsMine
+                        ? $"Winner: {value}! - SPACE to reset, ESC to quit"
+                        :  $"Winner: {value}! - ESC to quit";
                     break;
                 case MarkType.TIE:
-                    turnText.text = $"Tied! - SPACE to reset, ESC to quit";
+                    turnText.text = photonView.IsMine
+                        ? $"Tied! - SPACE to reset, ESC to quit"
+                        : "Tied! - ESC to quit";
                     break;
             }
         }
     }
 
-    // Cell states
-    private MarkType[] cells;
+    // Turn of the connected player (if playing online)
+    private MarkType MyTurn;
 
-    void OnEnable()
+    // Access to cells
+    [SerializeField] private SquareGridPopulator gridPopulator;
+
+    private GridCell[] cells
     {
-        Turn = MarkType.O;
-
-        cells = new MarkType[Size * Size];
-        for (int i = 0; i < cells.Length; ++i)
+        get
         {
-            cells[i] = MarkType.EMPTY;
+            return gridPopulator.Cells;
+        }
+    }
+
+    void Start()
+    {
+        if (photonView.IsMine)
+        {
+            Winner = MarkType.EMPTY;
+            MyTurn = MarkType.O;
+            Turn = MarkType.O;
+        }
+        else
+        {
+            MyTurn = MarkType.X;
         }
     }
 
     void Update()
     {
-        if (Winner != MarkType.EMPTY && Input.GetKeyDown(KeyCode.Space))
+        if (photonView.IsMine && Winner != MarkType.EMPTY && Input.GetKeyDown(KeyCode.Space))
         {
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            // The master player can reset the scene
+            PhotonNetwork.LoadLevel(SceneManager.GetActiveScene().buildIndex);
         }
         else if (Input.GetKeyDown(KeyCode.Escape))
         {
@@ -95,15 +130,56 @@ public class GameManager : MonoBehaviour, IPunObservable
             // Game has finished, do nothing
             return;
         }
-
-        int i = GetCellIndex(cell);
-        if (cells[i] == MarkType.EMPTY)
+        else if (PhotonNetwork.IsConnected && Turn != MyTurn)
         {
-            cells[i] = Turn;
-            cell.SetMark(Turn);
-            DetectVictoryConditionAround(cell.Row, cell.Column);
+            // We are in an online game, and it's not your turn!
+            return;
+        }
 
+        if (photonView.IsMine)
+        {
+            // Really change the cell
+            CellPlayed(cell);
+        }
+        else
+        {
+            // Send the move, but don't change the cell:
+            // we do not own the game state.
+            PhotonNetwork.RaiseEvent(1,
+                new int[] { cell.Row, cell.Column },
+                RaiseEventOptions.Default,
+                SendOptions.SendReliable);
+        }
+    }
+
+    private void CellPlayed(GridCell cell)
+    {
+        if (cell.Mark == MarkType.EMPTY)
+        {
+            cell.Mark = Turn;
+            DetectVictoryConditionAround(cell.Row, cell.Column);
             Turn = Turn == MarkType.O ? MarkType.X : MarkType.O;
+        }
+    }
+
+    public override void OnLeftRoom()
+    {
+        SceneManager.LoadScene("Lobby");
+    }
+
+    public void OnEvent(EventData photonEvent)
+    {
+        if (photonView.IsMine)
+        {
+            switch (photonEvent.Code)
+            {
+                case EVENT_MOVE:
+                    int[] data = (int[])photonEvent.CustomData;
+                    int row = data[0];
+                    int col = data[1];
+                    CellPlayed(cells[row * Size + col]);
+                    break;
+            }
         }
     }
 
@@ -125,7 +201,7 @@ public class GameManager : MonoBehaviour, IPunObservable
             || DetectVictoryConditionByMinorDiagonal(row, column))
         {
             int i = GetCellIndex(row, column);
-            Winner = cells[i];
+            Winner = gridPopulator.Cells[i].Mark;
         }
         else if (DetectTie())
         {
@@ -144,7 +220,7 @@ public class GameManager : MonoBehaviour, IPunObservable
         int i = GetCellIndex(row, column);
         for (int j = 0; j < Size; ++j)
         {
-            if (cells[GetCellIndex(j, Size - 1 - j)] != cells[i])
+            if (cells[GetCellIndex(j, Size - 1 - j)].Mark != cells[i].Mark)
             {
                 return false;
             }
@@ -163,7 +239,7 @@ public class GameManager : MonoBehaviour, IPunObservable
         int i = GetCellIndex(row, column);
         for (int j = 0; j < Size; ++j)
         {
-            if (cells[GetCellIndex(j, j)] != cells[i])
+            if (cells[GetCellIndex(j, j)].Mark != cells[i].Mark)
             {
                 return false;
             }
@@ -176,7 +252,7 @@ public class GameManager : MonoBehaviour, IPunObservable
         int i = GetCellIndex(row, column);
         for (int iRow = 0; iRow < Size; ++iRow)
         {
-            if (cells[GetCellIndex(iRow, column)] != cells[i])
+            if (cells[GetCellIndex(iRow, column)].Mark != cells[i].Mark)
             {
                 return false;
             }
@@ -189,7 +265,7 @@ public class GameManager : MonoBehaviour, IPunObservable
         int i = GetCellIndex(row, column);
         for (int iCol = 0; iCol < Size; ++iCol)
         {
-            if (cells[GetCellIndex(row, iCol)] != cells[i])
+            if (cells[GetCellIndex(row, iCol)].Mark != cells[i].Mark)
             {
                 return false;
             }
@@ -201,7 +277,7 @@ public class GameManager : MonoBehaviour, IPunObservable
     {
         for (int j = 0; j < cells.Length; ++j)
         {
-            if (cells[j] == MarkType.EMPTY)
+            if (cells[j].Mark == MarkType.EMPTY)
             {
                 return false;
             }
@@ -209,27 +285,34 @@ public class GameManager : MonoBehaviour, IPunObservable
         return true;
     }
 
+    public override void OnPlayerLeftRoom(Player other)
+    {
+        // The other player left - might as well leave, too!
+        PhotonNetwork.LeaveRoom();
+    }
+
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
         if (stream.IsWriting)
         {
-            stream.SendNext(this.Turn);
             stream.SendNext(this.Winner);
+            stream.SendNext(this.Turn);
 
-            foreach (MarkType cell in cells)
+            foreach (GridCell cell in cells)
             {
-                stream.SendNext(cell);
+                stream.SendNext(cell.Mark);
             }
         }
         else
         {
-            this.Turn = (MarkType) stream.ReceiveNext();
-            this.Winner = (MarkType)stream.ReceiveNext();
+            this.Winner = (MarkType) stream.ReceiveNext();
+            this.Turn = (MarkType)stream.ReceiveNext();
 
-            for (int i = 0; i < Size; i++)
+            for (int i = 0; i < cells.Length; i++)
             {
-                cells[i] = (MarkType)stream.ReceiveNext();
+                cells[i].Mark = (MarkType) stream.ReceiveNext();
             }
         }
     }
+
 }
