@@ -1,20 +1,21 @@
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Photon.Pun;
 
 /**
  * Holds the current state of the game, and updates the display.
  * 
  * Detects the winning condition.
  */
-public class GameManager : MonoBehaviour
+public class GameManager : MonoBehaviour, IPunObservable
 {
     public enum MarkType { EMPTY, X, O, TIE }
 
     public TextMeshProUGUI turnText;
 
     // Number of columns and rows of the grid
-    public int Size = 3;
+    public const int Size = 3;
 
     // Current turn in the game
     private MarkType _turn;
@@ -206,5 +207,29 @@ public class GameManager : MonoBehaviour
             }
         }
         return true;
+    }
+
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (stream.IsWriting)
+        {
+            stream.SendNext(this.Turn);
+            stream.SendNext(this.Winner);
+
+            foreach (MarkType cell in cells)
+            {
+                stream.SendNext(cell);
+            }
+        }
+        else
+        {
+            this.Turn = (MarkType) stream.ReceiveNext();
+            this.Winner = (MarkType)stream.ReceiveNext();
+
+            for (int i = 0; i < Size; i++)
+            {
+                cells[i] = (MarkType)stream.ReceiveNext();
+            }
+        }
     }
 }

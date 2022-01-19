@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -34,7 +32,7 @@ public class SquareGridPopulator : MonoBehaviour
 
         if (prefab != null)
         {
-            int n = gameManager.Size;
+            int n = GameManager.Size;
             float totalWidth = n * CellWidth + (n - 1) * XSpacing;
             float totalHeight = n * CellHeight + (n - 1) * YSpacing;
             rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, totalWidth);
