@@ -93,7 +93,7 @@ GameObject:
   - component: {fileID: 8675114452908989623}
   - component: {fileID: 8675114452908989616}
   m_Layer: 0
-  m_Name: OMarker
+  m_Name: XMarker
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -175,7 +175,7 @@ GameObject:
   - component: {fileID: 8675114453314909584}
   - component: {fileID: 8675114453314909585}
   m_Layer: 0
-  m_Name: XMarker
+  m_Name: OMarker
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

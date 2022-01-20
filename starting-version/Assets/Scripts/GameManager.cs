@@ -1,9 +1,6 @@
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using Photon.Pun;
-using Photon.Realtime;
-using ExitGames.Client.Photon;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -12,7 +9,7 @@ using System.Linq;
  * 
  * Detects the winning condition.
  */
-public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCallback
+public class GameManager : MonoBehaviour
 {
     #region Constants
 
@@ -47,16 +44,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
             _turn = value;
             if (Winner == MarkType.EMPTY)
             {
-                if (PhotonNetwork.IsConnected)
-                {
-                    turnText.text = MyTurn == Turn
-                        ? $"Your turn, {PhotonNetwork.NickName}"
-                        : $"Waiting for {GetOpponent().NickName}";
-                }
-                else
-                {
-                    turnText.text = $"Turn: {value}";
-                }
+                turnText.text = $"Turn: {value}";
             }
         }
     }
@@ -77,27 +65,12 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
             {
                 case MarkType.O:
                 case MarkType.X:
-                    string winnerName;
-                    if (PhotonNetwork.IsConnected)
-                    {
-                        winnerName = MyTurn == value
-                            ? PhotonNetwork.NickName
-                            : GetOpponent().NickName;
-                    }
-                    else
-                    {
-                        winnerName = Turn.ToString();
-                    }
-
-                    turnText.text = photonView.IsMine
-                        ? $"Winner: {winnerName}! - SPACE to reset, ESC to quit"
-                        :  $"Winner: {winnerName}! - ESC to quit";
+                    string winnerName = Turn.ToString();
+                    turnText.text = $"Winner: {winnerName}! - SPACE to reset, ESC to quit";
                     break;
 
                 case MarkType.TIE:
-                    turnText.text = photonView.IsMine
-                        ? $"Tied! - SPACE to reset, ESC to quit"
-                        : "Tied! - ESC to quit";
+                    turnText.text = $"Tied! - SPACE to reset, ESC to quit";
                     break;
             }
         }
@@ -110,33 +83,21 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
 
     #region Private game state
 
-    // Turn of the connected player (if playing online)
-    private MarkType MyTurn;
-
     #endregion
 
     #region Initialisation and input handling
 
     void Start()
     {
-        if (photonView.IsMine)
-        {
-            Winner = MarkType.EMPTY;
-            MyTurn = MarkType.O;
-            Turn = MarkType.O;
-        }
-        else
-        {
-            MyTurn = MarkType.X;
-        }
+        Winner = MarkType.EMPTY;
+        Turn = MarkType.O;
     }
 
     void Update()
     {
-        if (photonView.IsMine && Winner != MarkType.EMPTY && Input.GetKeyDown(KeyCode.Space))
+        if (Winner != MarkType.EMPTY && Input.GetKeyDown(KeyCode.Space))
         {
-            // The master player can reset the scene
-            PhotonNetwork.LoadLevel(SceneManager.GetActiveScene().buildIndex);
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
         else if (Input.GetKeyDown(KeyCode.Escape))
         {
@@ -165,26 +126,9 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
             // Game has finished, do nothing
             return;
         }
-        else if (PhotonNetwork.IsConnected && Turn != MyTurn)
-        {
-            // We are in an online game, and it's not your turn!
-            return;
-        }
 
-        if (photonView.IsMine)
-        {
-            // Really change the cell
-            CellPlayed(cell);
-        }
-        else
-        {
-            // Send the move, but don't change the cell:
-            // we do not own the game state.
-            PhotonNetwork.RaiseEvent(EVENT_MOVE,
-                new int[] { cell.Row, cell.Column },
-                RaiseEventOptions.Default,
-                SendOptions.SendReliable);
-        }
+        // Really change the cell
+        CellPlayed(cell);
     }
 
     private void CellPlayed(GridCell cell)
@@ -200,62 +144,6 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
     #endregion
 
     #region Photon event handling and synchronisation
-
-    public Player GetOpponent()
-    {
-        return PhotonNetwork.CurrentRoom.Players.Values.First(e => !e.IsLocal);
-    }
-
-    public void OnEvent(EventData photonEvent)
-    {
-        if (photonView.IsMine)
-        {
-            switch (photonEvent.Code)
-            {
-                case EVENT_MOVE:
-                    int[] data = (int[])photonEvent.CustomData;
-                    int row = data[0];
-                    int col = data[1];
-                    CellPlayed(cells[row * Size + col]);
-                    break;
-            }
-        }
-    }
-
-    public override void OnLeftRoom()
-    {
-        SceneManager.LoadScene("Lobby");
-    }
-
-    public override void OnPlayerLeftRoom(Player other)
-    {
-        // The other player left - might as well leave, too!
-        PhotonNetwork.LeaveRoom();
-    }
-
-    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
-    {
-        if (stream.IsWriting)
-        {
-            stream.SendNext(this.Winner);
-            stream.SendNext(this.Turn);
-
-            foreach (GridCell cell in cells)
-            {
-                stream.SendNext(cell.Mark);
-            }
-        }
-        else
-        {
-            this.Winner = (MarkType) stream.ReceiveNext();
-            this.Turn = (MarkType)stream.ReceiveNext();
-
-            for (int i = 0; i < cells.Count; i++)
-            {
-                cells[i].Mark = (MarkType) stream.ReceiveNext();
-            }
-        }
-    }
 
     #endregion
 
