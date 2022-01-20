@@ -1,18 +1,18 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Events;
 
 [RequireComponent(typeof(GridLayoutGroup), typeof(RectTransform))]
 public class SquareGridPopulator : MonoBehaviour
 {
     [SerializeField] private GameObject prefab;
 
-    [SerializeField] private GameManager gameManager;
+    public float CellWidth, CellHeight, XSpacing, YSpacing;
+    public GridCell[] Cells { get; private set; }
+    public UnityEvent<GridCell> createdCell;
+
     private GridLayoutGroup gridLayout;
     private RectTransform rectTransform;
-
-    public GridCell[] Cells { get; private set; }
-
-    public float CellWidth, CellHeight, XSpacing, YSpacing;
 
     void Awake()
     {
@@ -50,12 +50,14 @@ public class SquareGridPopulator : MonoBehaviour
                 GridCell cell = newObject.GetComponent<GridCell>();
                 if (cell != null)
                 {
-                    cell.gameManager = gameManager;
                     cell.Row = i / n;
                     cell.Column = i % n;
                 }
                 Cells[i] = cell;
+
+                createdCell.Invoke(cell);
             }
         }
     }
+
 }
