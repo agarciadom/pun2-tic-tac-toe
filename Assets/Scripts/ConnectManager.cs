@@ -73,9 +73,16 @@ public class ConnectManager : MonoBehaviourPunCallbacks
 
     public override void OnJoinedRoom()
     {
-        ShowStatus("Joined room with " + PhotonNetwork.CurrentRoom.PlayerCount + " player(s).");
-        if (PhotonNetwork.CurrentRoom.PlayerCount == 1)
+        ShowStatus("Joined room - waiting for another player.");
+    }
+
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        base.OnPlayerEnteredRoom(newPlayer);
+        if (PhotonNetwork.CurrentRoom.PlayerCount == 2 && PhotonNetwork.IsMasterClient)
         {
+            // We can start playing! IsMasterClient tells us we're the authoritative client,
+            // so we are the one in control of the scene.
             PhotonNetwork.LoadLevel("Game");
         }
     }
