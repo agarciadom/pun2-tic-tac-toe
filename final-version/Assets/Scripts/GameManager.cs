@@ -86,17 +86,17 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
                     }
                     else
                     {
-                        winnerName = Turn.ToString();
+                        winnerName = value.ToString();
                     }
 
                     turnText.text = photonView.IsMine
                         ? $"Winner: {winnerName}! - SPACE to reset, ESC to quit"
-                        :  $"Winner: {winnerName}! - ESC to quit";
+                        : $"Winner: {winnerName}! - ESC to quit";
                     break;
 
                 case MarkType.TIE:
                     turnText.text = photonView.IsMine
-                        ? $"Tied! - SPACE to reset, ESC to quit"
+                        ? "Tied! - SPACE to reset, ESC to quit"
                         : "Tied! - ESC to quit";
                     break;
             }

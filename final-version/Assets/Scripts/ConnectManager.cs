@@ -14,7 +14,6 @@ public class ConnectManager : MonoBehaviourPunCallbacks
     private bool isConnecting = false;
     private const string gameVersion = "v1";
 
-    // Start is called before the first frame update
     void Awake()
     {
         if (ConnectPanel == null)
