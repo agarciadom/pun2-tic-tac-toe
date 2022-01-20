@@ -1,19 +1,18 @@
-using System.Collections;
-using System.Collections.Generic;
+using System;
 using UnityEngine;
+using UnityEngine.Events;
 
 public class GridCell : MonoBehaviour
 {
     private const string xMarkerName = "XMarker";
     private const string oMarkerName = "OMarker";
 
+    public UnityEvent<GridCell> Clicked;
     public int Row, Column;
-    public GameManager gameManager;
 
     private GameObject oMarker, xMarker;
-
     private GameManager.MarkType _mark = GameManager.MarkType.EMPTY;
-    
+
     public GameManager.MarkType Mark
     {
         get
@@ -34,9 +33,8 @@ public class GridCell : MonoBehaviour
         xMarker = transform.Find(oMarkerName).gameObject;
     }
 
-    void OnMouseDown()
+    public void OnMouseDown()
     {
-        gameManager.CellClicked(this);
+        Clicked.Invoke(this);
     }
-
 }
