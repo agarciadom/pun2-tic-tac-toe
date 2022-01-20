@@ -327,6 +327,381 @@ It's time to add the actual multiplayer aspects to your game.
 
 ## Adding online multiplayer to the Game scene
 
+With online multiplayer, the main challenge is to keep all the game clients in sync: all players should be seeing the same game state.
+Photon has several ways to communicate the various game clients:
+
+* By using [PhotonView](https://doc-api.photonengine.com/en/pun/v2/class_photon_1_1_pun_1_1_photon_view.html), we can automatically synchronise transforms, animations, or any component that implements [IPunObservable](https://doc-api.photonengine.com/en/pun/v2/interface_photon_1_1_pun_1_1_i_pun_observable.html). A `PhotonView` is "owned" by the player that instantiated it into the scene: that player is the single source of truth about its state in the entire room.
+* Besides the automated synchronisation of PhotonViews, we can call a method on a remote object (a Remote Procedure Call), or raise an event across all clients, as documented [here](https://doc.photonengine.com/en-us/pun/current/gameplay/rpcsandraiseevent).
+
+Before we can start with the coding, we need to think about where the various pieces of the game state will "live" for Tic-Tac-Toe.
+Given this is a turn-based game, we can come up with the following:
+
+* The master client will own the global state of the "Game Manager" object, and is responsible for updating it based on everyone's moves.
+* Other clients cannot directly change the state of the "Game Manager": instead, they will raise an event that the master client can process.
+* Each client will have a bit of private state: specifically, which of the two players they are (either `X` or `O`).
+
+Let's start making those changes!
+
+### Adding automated synchronisation to the Game Manager
+
+The first part is to add a `PhotonView` to any entity with a component whose state needs to be synchronised across players.
+
+*Step 1.* Open the Game scene, and add a PhotonView component to the "Game Manager" entity.
+
+*Step 2.* Change the "Synchronization" in the PhotonView component to be "Reliable Delta Compressed".
+This is a turn-based game with very "discrete" changes, rather than an action game with many small updates.
+We do not want to miss any updates (as we may miss a change of turn!), and the reliability will not be a large overhead anyway as we will not have that many updates.
+
+*Step 3.* Open the `GameManager.cs` script.
+Change its base class to `MonoBehaviourPun` (you will need `using Photon.Pun;`): this allows us easy access to the `photonView`.
+In addition, make it implement `IPunObservable` so we can synchronise the relevant parts of its state across the network:
+
+```csharp
+public class GameManager : MonoBehaviourPun, IPunObservable {
+	// ...
+}
+```
+
+*Step 4.* You will need to implement the `OnPhotonSerializeView` method.
+I suggest that you add it within the `#region`  dedicated to "Photon event handling and synchronisaton", just to keep things tidy.
+The method will be as follows:
+
+```csharp
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (stream.IsWriting)
+        {
+            stream.SendNext(this.Winner);
+            stream.SendNext(this.Turn);
+
+            foreach (GridCell cell in cells)
+            {
+                stream.SendNext(cell.Mark);
+            }
+        }
+        else
+        {
+            this.Winner = (MarkType)stream.ReceiveNext();
+            this.Turn = (MarkType)stream.ReceiveNext();
+
+            for (int i = 0; i < cells.Count; i++)
+            {
+                cells[i].Mark = (MarkType)stream.ReceiveNext();
+            }
+        }
+    }
+```
+
+This method works as follows:
+
+* For the master client (our source of truth), `stream.IsWriting` will be true, and it will send the current winner, turn, and the state of each cell across the network multiple times per second. (Note: Photon optimises this by only sending the information when it changes.)
+* For other clients, `stream.IsWriting` will be false, and it will update the state of the `GameManager` by reading the current winner, turn, and the state of the cells from the master client.
+* You will notice that the `ReceiveNext` calls must map *exactly* to the `SendNext` calls, and that you must [cast the returned value](https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/types/casting-and-type-conversions#explicit-conversions) to the type you are expecting (see the `(MarkType)` casts?).
+
+*Step 5.* Save the script and return to the editor.
+You should be able to build and run your application, and test your multiplayer capabilities.
+Try starting a 2-player game, and play for a bit from both sides: do you notice anything?
+
+Yes, only the moves from the master client seem to matter - anything that the other player tries to do is immediately overwritten by the master client! Clearly, there is still work to do.
+
+### Letting the other player communicate moves
+
+The main issue is that the other player is not the source of truth of the GameManager PhotonView: they should not be attempting to change it directly. Instead, they should tell the master client about the move they are trying to make, and let the master client update the game state accordingly. We will use events for this.
+
+*Step 1.* Open the `GameManager.cs` script and go to the `OnCellClicked` method.
+Replace this code:
+
+```csharp
+// Really change the cell
+CellPlayed(cell);
+```
+
+With this code (you will need `using Photon.Realtime;` and `using ExitGames.Client.Photon;` at the top of the file):
+
+```csharp
+if (photonView.IsMine)
+{
+  // Really change the cell
+  CellPlayed(cell);
+}
+else
+{
+    // Send the move, but don't change the cell:
+    // we do not own the game state.
+    PhotonNetwork.RaiseEvent(EVENT_MOVE,
+      new int[] { cell.Row, cell.Column },
+      RaiseEventOptions.Default,
+      SendOptions.SendReliable);
+}
+```
+
+The meaning of this code is as follows:
+
+* If we are the master client, `photonView.IsMine` will be true (we are the source of truth for it), and we can directly manipulate the cell and let all other players synchronise themselves.
+* If we are NOT the master client, we will instead raise an event saying that we want to make a move by selecting the cell at that row and column. `EVENT_MOVE` is just an integer constant (1) that we have defined at the top of `GameManager` (we can use any number from 0 to 199), and we can send any object that Photon can serialise (arrays, primitives, and enums all work well). We are using the default options, and we want the event to be sent in a reliable way as we do not want any moves to be missed.
+
+*Step 2.* The next part is to allow the master client to react to those events.
+Change the base class of the `GameManager` to `MonoBehaviourPunCallbacks`, and add the `IOnEventCallback` interface:
+
+```csharp
+public class GameManager : MonoBehaviourPun, IPunObservable, IOnEventCallback {
+	// ...
+}
+```
+
+*Step 3.* Implement the `OnEvent` method of the `IOnEventCallback` interface:
+
+```csharp
+    public void OnEvent(EventData photonEvent)
+    {
+        if (photonView.IsMine)
+        {
+            switch (photonEvent.Code)
+            {
+                case EVENT_MOVE:
+                    int[] data = (int[])photonEvent.CustomData;
+                    int row = data[0];
+                    int col = data[1];
+                    CellPlayed(cells[row * Size + col]);
+                    break;
+            }
+        }
+    }
+```
+
+This function says that if we are the source of truth for this "GameManager", and the event code is `EVENT_CODE`, then we will take the data from the move from the other player and execute that move on their behalf.
+
+*Step 4.* Try rebuilding the game and playing again.
+Try playing several moves from both sides: do you see the problem?
+
+Yes - both players can make moves now, but they're not taking turns!
+
+### Enforcing turns
+
+We should only let a player play during their turn - it wouldn't be fair otherwise!
+This means that we need to allow each player to remember who they are in the game: are they the X player, or the O player?
+
+*Step 1.* Open the `GameManager.cs` script.
+Within the `#region` "Private game state" (to keep things tidy: this is entirely optional!), add this field:
+
+```csharp
+// Turn of the connected player (if playing online)
+private MarkType MyTurn;
+```
+
+This field will allow each player to know who they are in the game.
+
+*Step 2.* Change the body of the `Start` method to this:
+
+```csharp
+if (photonView.IsMine)
+{
+    Winner = MarkType.EMPTY;
+    MyTurn = MarkType.O;
+    Turn = Random.Range(0, 2) == 0 ? MarkType.O : MarkType.X;
+}
+else
+{
+    MyTurn = MarkType.X;
+}
+```
+
+The master client will always be the O player, and the other player will always be the X player.
+To keep things more interesting, we've decided to make the starting player random: 50% of the time it will be O, and 50% it will be X.
+
+*Step 3.* Go to the `OnCellClicked` method.
+Right after the `if(Winner != MarkType.EMPTY)` conditional block, add this `else if` block:
+
+```csharp
+if (Winner != MarkType.EMPTY)
+{
+  // Game has finished, do nothing
+  return;
+}
+else if (PhotonNetwork.IsConnected && Turn != MyTurn)
+{
+  // We are in an online game, and it's not your turn!
+  return;
+}
+```
+
+This is simple: if we're playing an online game, and it's not your turn, ignore the click!
+
+*Step 4.* Try playing the game once more.
+You should now find that turns are correctly enforced.
+However, when you finish a game, the second player can press SPACE and nothing will happen on the other side.
+Should they even be allowed to do that?
+
+### Keeping the master client in control of resets
+
+We have decided that only the master client should be able to press space to reset the game at the end of a round.
+We need to tweak the code accordingly.
+
+*Step 1.* Go to the `GameManager.cs` script, and go to the "Update" method.
+Replace this code:
+
+```csharp
+if (Winner != MarkType.EMPTY && Input.GetKeyDown(KeyCode.Space))
+{
+    SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+}
+```
+
+With this code:
+
+```csharp
+if (photonView.IsMine && Winner != MarkType.EMPTY && Input.GetKeyDown(KeyCode.Space))
+{
+    PhotonNetwork.LoadLevel(SceneManager.GetActiveScene().buildIndex);
+}
+```
+
+This wil only let the master client reset the game by pressing space when there has been a winner declared.
+Key presses from other clients will be ignored.
+
+*Step 2.* It may confuse a player to be told that they can press space, only to be ignored!
+Let's tweak the `Winner` property to provide accurate text depending on the situation.
+Change this:
+
+```csharp
+turnText.text = $"Winner: {winnerName}! - SPACE to reset, ESC to quit";
+```
+
+To this:
+
+```csharp
+turnText.text = photonView.IsMine
+    ? $"Winner: {winnerName}! - SPACE to reset, ESC to quit"
+    :  $"Winner: {winnerName}! - ESC to quit";
+```
+
+Likewise, change this:
+
+```csharp
+turnText.text = $"Tied! - SPACE to reset, ESC to quit";
+```
+
+To this:
+
+```csharp
+turnText.text = photonView.IsMine
+  ? "Tied! - SPACE to reset, ESC to quit"
+  : "Tied! - ESC to quit";
+```
+
+*Step 3.* Save the script and try playing the game: only the master client should be able to reset the game now.
+As an optional exercise, you may want to try using a Photon event to propagate the reset from the second client, and still allow both clients to initiate resets.
+
+What happens if one player decides to quit the game by pressing Escape, though?
+
+### Reacting to the other player leaving the game
+
+Right now, the game does not react when the other player disconnects or leaves the room.
+We need to add more code for it!
+
+*Step 1.* Open the `GameManager.cs` script, and add this method to the region discussing Photon event handling:
+
+```csharp
+public override void OnPlayerLeftRoom(Player other)
+{
+    // The other player left - might as well leave, too!
+    PhotonNetwork.LeaveRoom();
+}
+```
+
+This method makes it so that if the other player leaves the room, we will leave the room as well.
+
+*Step 2.* Add this other method to complete the work:
+
+```csharp
+public override void OnLeftRoom()
+{
+    SceneManager.LoadScene("Lobby");
+}
+```
+
+With this method, when we leave the room, we will return to the lobby.
+Notice how we use `SceneManager.LoadScene` for this, and not `PhotonNetwork.LoadLevel`: we are not in a room anymore, so there is nothing to synchronise.
+
+*Step 3.* As usual, try playing the game again - see how it reacts to someone leaving?
+
+### Using Photon nicknames
+
+There is only one more detail to cover: right now, it's never quite clear if it's our turn's or the opponent's.
+It would be nicer to have the UI tell us, and remind us of the other player's nickname, so we can recognise the player the next time we meet them.
+
+*Step 1.* Open the `GameManager.cs` script.
+We need to add a method that will tell us who is our opponent, in case it's not our turn.
+Add this method to the class:
+
+```csharp
+private Player GetOpponent()
+{
+    foreach (Player player in PhotonNetwork.CurrentRoom.Players.Values) {
+        if (!player.IsLocal)
+        {
+            return player;
+        }
+    }
+    return null;
+}
+```
+
+This method will give us the first player who is not local (i.e. us): in other words, our opponent.
+We can get the nickname of the player from that object.
+
+*Step 2.* Let's update the `Turn` property first.
+Within its `set` method, change this code:
+
+```csharp
+turnText.text = $"Turn: {value}";
+```
+
+To this code, which changes how things work for online games:
+
+```csharp
+if (PhotonNetwork.IsConnected)
+{
+    turnText.text = MyTurn == Turn
+        ? $"Your turn, {PhotonNetwork.NickName}"
+        : $"Waiting for {GetOpponent().NickName}";
+}
+else
+{
+    turnText.text = $"Turn: {value}";
+}
+```
+
+If we are in an online game, it will clearly say if it's our turn or the opponent's, and use the appropriate nickname.
+
+*Step 3.* Now, let's update the `Winner` property as well.
+In the `set` method, change this code:
+
+```csharp
+string winnerName = value.ToString();
+```
+
+To this:
+
+```csharp
+string winnerName;
+if (PhotonNetwork.IsConnected)
+{
+    winnerName = MyTurn == value
+        ? PhotonNetwork.NickName
+        : GetOpponent().NickName;
+}
+else
+{
+    winnerName = value.ToString();
+}
+```
+
+*Step 4.* One last time, try building and playing your game.
+It should clearly signal whose turn it is now, based on the nickname you entered in the lobby.
+
+And with that, congratulations - you've finished your first online turn-based multiplayer game with Unity and PUN2!
+
 ## Further reading
 
 * [Photon PUN2 documentation](https://doc.photonengine.com/en-US/pun/current/getting-started/pun-intro)
