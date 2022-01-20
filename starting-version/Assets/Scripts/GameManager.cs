@@ -2,7 +2,6 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
-using System.Linq;
 
 /**
  * Holds the current state of the game, and updates the display.
@@ -65,7 +64,7 @@ public class GameManager : MonoBehaviour
             {
                 case MarkType.O:
                 case MarkType.X:
-                    string winnerName = Turn.ToString();
+                    string winnerName = value.ToString();
                     turnText.text = $"Winner: {winnerName}! - SPACE to reset, ESC to quit";
                     break;
 
