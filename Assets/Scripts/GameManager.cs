@@ -4,6 +4,8 @@ using UnityEngine.SceneManagement;
 using Photon.Pun;
 using Photon.Realtime;
 using ExitGames.Client.Photon;
+using System.Collections.Generic;
+using System.Linq;
 
 /**
  * Holds the current state of the game, and updates the display.
@@ -12,17 +14,27 @@ using ExitGames.Client.Photon;
  */
 public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCallback
 {
+    #region Constants
+
     // Event: the remote player has clicked on a cell at (row, column)
     public const int EVENT_MOVE = 1;
 
     // Possible turns and states of a cell
     public enum MarkType { EMPTY, X, O, TIE }
 
+    // Number of columns and rows of the grid
+    public const int Size = 3;
+
+    #endregion
+
+    #region Inspector-based configuration
+
     // Text label we will use to display state
     public TextMeshProUGUI turnText;
 
-    // Number of columns and rows of the grid
-    public const int Size = 3;
+    #endregion
+
+    #region Shared game state
 
     // Current turn in the game
     private MarkType _turn;
@@ -38,8 +50,8 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
                 if (PhotonNetwork.IsConnected)
                 {
                     turnText.text = MyTurn == Turn
-                        ? "Your turn, " + PhotonNetwork.NickName
-                        : "Waiting for " + PhotonNetwork.NickName;
+                        ? $"Your turn, {PhotonNetwork.NickName}"
+                        : $"Waiting for {GetOpponent().NickName}";
                 }
                 else
                 {
@@ -65,10 +77,23 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
             {
                 case MarkType.O:
                 case MarkType.X:
+                    string winnerName;
+                    if (PhotonNetwork.IsConnected)
+                    {
+                        winnerName = MyTurn == value
+                            ? PhotonNetwork.NickName
+                            : GetOpponent().NickName;
+                    }
+                    else
+                    {
+                        winnerName = Turn.ToString();
+                    }
+
                     turnText.text = photonView.IsMine
-                        ? $"Winner: {value}! - SPACE to reset, ESC to quit"
-                        :  $"Winner: {value}! - ESC to quit";
+                        ? $"Winner: {winnerName}! - SPACE to reset, ESC to quit"
+                        :  $"Winner: {winnerName}! - ESC to quit";
                     break;
+
                 case MarkType.TIE:
                     turnText.text = photonView.IsMine
                         ? $"Tied! - SPACE to reset, ESC to quit"
@@ -78,19 +103,19 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
         }
     }
 
+    // Access to cells
+    private List<GridCell> cells = new List<GridCell>();
+
+    #endregion
+
+    #region Private game state
+
     // Turn of the connected player (if playing online)
     private MarkType MyTurn;
 
-    // Access to cells
-    [SerializeField] private SquareGridPopulator gridPopulator;
+    #endregion
 
-    private GridCell[] cells
-    {
-        get
-        {
-            return gridPopulator.Cells;
-        }
-    }
+    #region Initialisation and input handling
 
     void Start()
     {
@@ -123,7 +148,17 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
         }
     }
 
-    public void CellClicked(GridCell cell)
+    #endregion
+
+    #region Game event handling
+
+    public void OnCellCreated(GridCell cell)
+    {
+        cells.Add(cell);
+        cell.Clicked.AddListener(OnCellClicked);
+    }
+
+    public void OnCellClicked(GridCell cell)
     {
         if (Winner != MarkType.EMPTY)
         {
@@ -145,7 +180,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
         {
             // Send the move, but don't change the cell:
             // we do not own the game state.
-            PhotonNetwork.RaiseEvent(1,
+            PhotonNetwork.RaiseEvent(EVENT_MOVE,
                 new int[] { cell.Row, cell.Column },
                 RaiseEventOptions.Default,
                 SendOptions.SendReliable);
@@ -162,9 +197,13 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
         }
     }
 
-    public override void OnLeftRoom()
+    #endregion
+
+    #region Photon event handling and synchronisation
+
+    public Player GetOpponent()
     {
-        SceneManager.LoadScene("Lobby");
+        return PhotonNetwork.CurrentRoom.Players.Values.First(e => !e.IsLocal);
     }
 
     public void OnEvent(EventData photonEvent)
@@ -183,6 +222,45 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
         }
     }
 
+    public override void OnLeftRoom()
+    {
+        SceneManager.LoadScene("Lobby");
+    }
+
+    public override void OnPlayerLeftRoom(Player other)
+    {
+        // The other player left - might as well leave, too!
+        PhotonNetwork.LeaveRoom();
+    }
+
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (stream.IsWriting)
+        {
+            stream.SendNext(this.Winner);
+            stream.SendNext(this.Turn);
+
+            foreach (GridCell cell in cells)
+            {
+                stream.SendNext(cell.Mark);
+            }
+        }
+        else
+        {
+            this.Winner = (MarkType) stream.ReceiveNext();
+            this.Turn = (MarkType)stream.ReceiveNext();
+
+            for (int i = 0; i < cells.Count; i++)
+            {
+                cells[i].Mark = (MarkType) stream.ReceiveNext();
+            }
+        }
+    }
+
+    #endregion
+
+    #region Cell accessors
+
     private int GetCellIndex(GridCell cell)
     {
         return GetCellIndex(cell.Row, cell.Column);
@@ -193,6 +271,10 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
         return row * Size + column;
     }
 
+    #endregion
+
+    #region Victory detection
+
     private void DetectVictoryConditionAround(int row, int column)
     {
         if (DetectVictoryConditionByRow(row, column)
@@ -201,7 +283,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
             || DetectVictoryConditionByMinorDiagonal(row, column))
         {
             int i = GetCellIndex(row, column);
-            Winner = gridPopulator.Cells[i].Mark;
+            Winner = cells[i].Mark;
         }
         else if (DetectTie())
         {
@@ -275,7 +357,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
 
     private bool DetectTie()
     {
-        for (int j = 0; j < cells.Length; ++j)
+        for (int j = 0; j < cells.Count; ++j)
         {
             if (cells[j].Mark == MarkType.EMPTY)
             {
@@ -285,34 +367,5 @@ public class GameManager : MonoBehaviourPunCallbacks, IPunObservable, IOnEventCa
         return true;
     }
 
-    public override void OnPlayerLeftRoom(Player other)
-    {
-        // The other player left - might as well leave, too!
-        PhotonNetwork.LeaveRoom();
-    }
-
-    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
-    {
-        if (stream.IsWriting)
-        {
-            stream.SendNext(this.Winner);
-            stream.SendNext(this.Turn);
-
-            foreach (GridCell cell in cells)
-            {
-                stream.SendNext(cell.Mark);
-            }
-        }
-        else
-        {
-            this.Winner = (MarkType) stream.ReceiveNext();
-            this.Turn = (MarkType)stream.ReceiveNext();
-
-            for (int i = 0; i < cells.Length; i++)
-            {
-                cells[i].Mark = (MarkType) stream.ReceiveNext();
-            }
-        }
-    }
-
+    #endregion
 }
