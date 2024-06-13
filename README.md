@@ -1,6 +1,6 @@
 # Unity + Photon 2 Tic Tac Toe
 
-This repository contains two Unity projects:
+This repository contains two Unity projects (developed with Unity 2020.3.25f1):
 
 * [`starting-version`](./starting-version), a toy Unity project with a single scene implementing a "hotseat" version of Tic-Tac-Toe.
 * [`final-version`](./final-version), an extended version of the above project that uses [PUN](https://www.photonengine.com/) to add online multiplayer capabilities.
